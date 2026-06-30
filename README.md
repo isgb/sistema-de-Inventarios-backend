@@ -1,43 +1,51 @@
 # Backend - Sistema de Inventarios Empresarial
 
-API REST para gestión de inventarios con autenticación JWT, control de acceso por roles (RBAC) y seguridad contra inyecciones.
+API REST para gestión de inventarios empresariales con autenticación JWT, sistema RBAC desacoplado en base de datos y protección contra inyecciones NoSQL.
 
 ## Stack
 
 | Dependencia | Propósito |
 |---|---|
-| Express 4 | Framework HTTP |
-| Mongoose 8 | ODM para MongoDB |
-| jsonwebtoken 9 | Access tokens + refresh tokens |
-| bcrypt 5 | Hashing de contraseñas (12 salt rounds) |
-| helmet 8 | Headers HTTP seguros |
-| cors 2 | Restricción de origen |
-| express-rate-limit 7 | Protección contra abuso |
-| express-mongo-sanitize | Prevención de NoSQL injection |
-| express-validator 7 | Validación y sanitización de inputs |
-| nodemon (dev) | Hot-reload en desarrollo |
+| express | Framework HTTP para la API REST |
+| mongoose | ODM para modelar y consultar MongoDB |
+| jsonwebtoken | Generación y verificación de access y refresh tokens |
+| bcrypt | Hashing de contraseñas y refresh tokens (12 salt rounds) |
+| dotenv | Carga de variables de entorno desde .env |
+| helmet | Headers HTTP de seguridad (CSP, HSTS, X-Content-Type) |
+| cors | Restricción de origen para peticiones del frontend |
+| express-rate-limit | Límite de peticiones por IP para prevenir abuso |
+| express-mongo-sanitize | Eliminación de operadores $ y . contra inyección NoSQL |
+| express-validator | Validación y sanitización de datos de entrada |
+| exceljs | Generar (.xlsx de exportación) y leer (.xlsx de importación) archivos Excel |
+| multer | Recibir el archivo .xlsx subido en memoria (sin escribir a disco) |
+| nodemon (dev) | Reinicio automático del servidor en desarrollo |
 
 ## Requisitos
 
 - Node.js >= 18
-- MongoDB >= 6 (local o [Atlas](https://www.mongodb.com/atlas))
+- MongoDB >= 6
+
+> Los movimientos de inventario usan transacciones MongoDB cuando hay replica set
+> disponible (MongoDB Atlas lo tiene por defecto). En desarrollo local con MongoDB
+> standalone, `movement.service.js` detecta esto automáticamente y ejecuta las
+> mismas operaciones sin transacción, sin que el endpoint falle.
 
 ## Instalación y arranque
 
 ```bash
 npm install
 cp .env.example .env    # Editar con tus valores
-npm run seed            # Crea SUPER_ADMIN + categorías
+npm run seed            # Crea roles, permisos, SUPER_ADMIN y categorías
 npm run dev             # Desarrollo con hot-reload (puerto 5000)
 ```
 
-## Scripts disponibles
+## Scripts
 
 | Script | Comando | Descripción |
 |---|---|---|
-| `npm run dev` | `nodemon src/server.js` | Servidor con hot-reload |
+| `npm run dev` | `nodemon src/server.js` | Servidor con hot-reload en puerto 5000 |
 | `npm start` | `node src/server.js` | Servidor en producción |
-| `npm run seed` | `node src/seed/seed.js` | Crea usuario admin y categorías |
+| `npm run seed` | `node src/seed/seed.js` | Datos iniciales (idempotente, puede ejecutarse varias veces) |
 
 ## Variables de entorno
 
@@ -46,64 +54,78 @@ Documentadas en `.env.example`:
 | Variable | Valor por defecto | Descripción |
 |---|---|---|
 | `PORT` | `5000` | Puerto del servidor |
-| `NODE_ENV` | `development` | Entorno: development o production |
+| `NODE_ENV` | `development` | development o production |
 | `MONGODB_URI` | `mongodb://localhost:27017/inventario_empresarial` | URI de conexión a MongoDB |
-| `JWT_SECRET` | - | Secreto para access tokens (min 32 caracteres) |
+| `JWT_SECRET` | - | Secreto para firmar access tokens (min 32 caracteres) |
 | `JWT_EXPIRES_IN` | `15m` | Duración del access token |
-| `JWT_REFRESH_SECRET` | - | Secreto para refresh tokens (diferente al anterior) |
+| `JWT_REFRESH_SECRET` | - | Secreto para firmar refresh tokens (diferente al anterior) |
 | `JWT_REFRESH_EXPIRES_IN` | `7d` | Duración del refresh token |
-| `CORS_ORIGIN` | `http://localhost:5173` | Origen permitido (frontend) |
-| `RATE_LIMIT_WINDOW_MS` | `900000` | Ventana de rate limit en ms (15 min) |
-| `RATE_LIMIT_MAX` | `100` | Peticiones máximas por ventana |
+| `CORS_ORIGIN` | `http://localhost:5173` | URL del frontend permitida |
+| `RATE_LIMIT_WINDOW_MS` | `900000` | Ventana del rate limit en milisegundos (15 min) |
+| `RATE_LIMIT_MAX` | `100` | Peticiones máximas por ventana por IP |
 
 ## Estructura del proyecto
 
 ```
 src/
 ├── config/
-│   ├── db.js                  Conexión a MongoDB
-│   └── roles.js               Roles, permisos y jerarquía RBAC
+│   └── db.js                  Conexión a MongoDB
 ├── controllers/               Reciben req/res, delegan al service
+│   ├── activity.controller.js
 │   ├── auth.controller.js
 │   ├── category.controller.js
 │   ├── movement.controller.js
 │   ├── product.controller.js
+│   ├── role.controller.js
 │   └── user.controller.js
 ├── middleware/
-│   ├── authenticate.js        Verifica JWT en Authorization header
-│   ├── authorize.js           Verifica permisos del rol (RBAC)
-│   ├── errorHandler.js        Manejo centralizado de errores
-│   └── validate.js            Ejecuta express-validator y retorna 400
-├── models/                    Schemas de Mongoose
-│   ├── User.js
-│   ├── Product.js
-│   ├── Category.js
-│   └── InventoryMovement.js
+│   ├── authenticate.js        Verifica JWT y adjunta req.user
+│   ├── authorize.js           Verifica permisos RBAC desde DB con cache
+│   ├── errorHandler.js        Manejo centralizado de todos los errores (incluye MulterError)
+│   ├── upload.js              multer en memoria: solo .xlsx, máx 3MB, para importar productos
+│   └── validate.js            Ejecuta reglas de express-validator
+├── models/
+│   ├── ActivityLog.js         Log de actividad compartido (quién hizo qué, para el dashboard)
+│   ├── Category.js            Clasificación de productos
+│   ├── InventoryMovement.js   Registro de entradas, salidas y ajustes de stock
+│   ├── Permission.js          Acción permitida sobre un recurso (RBAC)
+│   ├── Product.js             Artículo del inventario con stock y precio
+│   ├── Role.js                Rol del sistema (SUPER_ADMIN, ADMIN, etc.)
+│   ├── RolePermission.js      Mapeo N:N entre Role y Permission
+│   ├── User.js                Perfil y credenciales (sin campo role)
+│   └── UserRole.js            Mapeo N:N entre User y Role
 ├── routes/                    Definición de endpoints por recurso
+│   ├── activity.routes.js
 │   ├── auth.routes.js
 │   ├── category.routes.js
 │   ├── movement.routes.js
 │   ├── product.routes.js
+│   ├── role.routes.js
 │   └── user.routes.js
 ├── services/                  Lógica de negocio (sin req/res)
-│   ├── auth.service.js
-│   ├── category.service.js
-│   ├── movement.service.js
-│   ├── product.service.js
-│   └── user.service.js
+│   ├── activity.service.js    Registrar y consultar actividad reciente
+│   ├── auth.service.js        Registro, login, refresh, logout
+│   ├── category.service.js    Listar (activas o todas), crear y actualizar categorías
+│   ├── movement.service.js    Movimientos de stock paginados/filtrados, transacción con fallback
+│   ├── permission.service.js  Consulta de permisos con cache en memoria
+│   ├── product.service.js     CRUD paginado de productos, stats, import/export Excel
+│   ├── role.service.js        Asignación y revocación de roles
+│   └── user.service.js        CRUD paginado de usuarios con roles
 ├── validations/               Reglas de express-validator por entidad
 │   ├── auth.validation.js
+│   ├── category.validation.js
 │   ├── movement.validation.js
 │   ├── product.validation.js
+│   ├── role.validation.js
 │   └── user.validation.js
 ├── utils/
-│   ├── AppError.js            Clase para errores operacionales
-│   ├── jwt.js                 Generación y verificación de tokens
-│   └── response.js            Helpers para respuestas consistentes
+│   ├── AppError.js            Clase para errores operacionales con statusCode
+│   ├── jwt.js                 Generación y verificación de access y refresh tokens
+│   └── response.js            sendSuccess() para respuestas con formato unificado
 ├── seed/
-│   └── seed.js                Datos iniciales (admin + categorías)
-├── app.js                     Configuración de Express y middleware
-└── server.js                  Entry point: conecta DB e inicia server
+│   └── seed.js                Roles, permisos, mapeos, admin y categorías
+├── app.js                     Configuración de Express, seguridad y rutas
+└── server.js                  Punto de entrada: conecta DB e inicia servidor
 ```
 
 ## Seed inicial
@@ -112,12 +134,24 @@ src/
 npm run seed
 ```
 
-Crea:
+Crea los datos mínimos para que el sistema funcione:
 
-- Un usuario **SUPER_ADMIN** con email `admin@inventario.com` y password `Admin123!`
+- 4 roles: SUPER_ADMIN, ADMIN, MANAGER, USER
+- 16 permisos: combinaciones de recurso + acción (incluye `activity:read`)
+- 39 mapeos rol-permiso: qué permisos tiene cada rol
+- 4 usuarios de prueba (uno por rol), ver tabla en [Usuarios de prueba](#usuarios-de-prueba)
 - 8 categorías: Electrónica, Periféricos, Mobiliario, Accesorios, Almacenamiento, Software, Redes, Otros
 
-El seed es idempotente: si el admin o las categorías ya existen, no los duplica.
+El seed es idempotente: puede ejecutarse varias veces sin duplicar datos.
+
+### Usuarios de prueba
+
+| Rol | Email | Password |
+|---|---|---|
+| SUPER_ADMIN | `admin@inventario.com` | `Admin123!` |
+| ADMIN | `carlos.admin@inventario.com` | `Admin123!` |
+| MANAGER | `laura.manager@inventario.com` | `Manager123!` |
+| USER | `pedro.user@inventario.com` | `User123!` |
 
 ## API REST
 
@@ -129,16 +163,39 @@ Todas las rutas protegidas requieren el header:
 Authorization: Bearer <access_token>
 ```
 
+### Formato de respuesta
+
+Todas las respuestas usan el mismo formato:
+
+Éxito:
+
+```json
+{
+  "success": true,
+  "message": "Descripción de la operación",
+  "data": {}
+}
+```
+
+Error:
+
+```json
+{
+  "success": false,
+  "message": "Descripción del error"
+}
+```
+
 ---
 
 ### Autenticación
 
-| Método | Ruta | Descripción | Acceso |
+| Método | Ruta | Acceso | Descripción |
 |---|---|---|---|
-| POST | `/auth/register` | Registro público | Público |
-| POST | `/auth/login` | Iniciar sesión | Público |
-| POST | `/auth/refresh` | Renovar access token | Público |
-| POST | `/auth/logout` | Cerrar sesión | Autenticado |
+| POST | `/auth/register` | Público | Registro de usuario (se asigna rol USER) |
+| POST | `/auth/login` | Público | Inicio de sesión con email y password |
+| POST | `/auth/refresh` | Público | Renovar access token con refresh token |
+| POST | `/auth/logout` | Autenticado | Cerrar sesión (invalida refresh token) |
 
 **Login** `POST /api/auth/login`
 
@@ -157,14 +214,17 @@ Response `200`:
 {
   "success": true,
   "message": "Login exitoso",
-  "user": {
-    "_id": "664f1a2b...",
-    "name": "Super Admin",
-    "email": "admin@inventario.com",
-    "role": "SUPER_ADMIN"
-  },
-  "token": "eyJhbGciOi...",
-  "refreshToken": "eyJhbGciOi..."
+  "data": {
+    "user": {
+      "_id": "664f1a2b...",
+      "name": "Super Admin",
+      "email": "admin@inventario.com",
+      "status": "active"
+    },
+    "roles": ["SUPER_ADMIN"],
+    "token": "eyJhbGciOi...",
+    "refreshToken": "eyJhbGciOi..."
+  }
 }
 ```
 
@@ -180,22 +240,7 @@ Request:
 }
 ```
 
-Response `201`:
-
-```json
-{
-  "success": true,
-  "message": "Usuario registrado exitosamente",
-  "user": {
-    "_id": "664f1a2b...",
-    "name": "Nuevo Usuario",
-    "email": "nuevo@correo.com",
-    "role": "USER"
-  },
-  "token": "eyJhbGciOi...",
-  "refreshToken": "eyJhbGciOi..."
-}
-```
+Response `201`: mismo formato que login.
 
 **Refresh** `POST /api/auth/refresh`
 
@@ -212,8 +257,11 @@ Response `200`:
 ```json
 {
   "success": true,
-  "token": "eyJhbGciOi...",
-  "refreshToken": "eyJhbGciOi..."
+  "message": "Token renovado",
+  "data": {
+    "token": "eyJhbGciOi...",
+    "refreshToken": "eyJhbGciOi..."
+  }
 }
 ```
 
@@ -221,14 +269,38 @@ Response `200`:
 
 ### Productos
 
-| Método | Ruta | Descripción | Acceso |
+| Método | Ruta | Permiso | Descripción |
 |---|---|---|---|
-| GET | `/products` | Listar todos | Cualquier rol |
-| GET | `/products/stats` | Estadísticas del dashboard | Cualquier rol |
-| GET | `/products/:id` | Detalle de un producto | Cualquier rol |
-| POST | `/products` | Crear producto | ADMIN+ |
-| PUT | `/products/:id` | Actualizar producto | ADMIN+ |
-| DELETE | `/products/:id` | Eliminar producto | ADMIN+ |
+| GET | `/products` | `products:read` | Listar paginado, con búsqueda/filtro/orden |
+| GET | `/products/stats` | `products:read` | Estadísticas del inventario |
+| GET | `/products/export` | `products:read` | Descargar inventario completo en `.xlsx` |
+| POST | `/products/import/preview` | `products:create` | Subir `.xlsx`, validar sin guardar |
+| POST | `/products/import/confirm` | `products:create` | Insertar en lote las filas validadas |
+| GET | `/products/:id` | `products:read` | Detalle de un producto |
+| POST | `/products` | `products:create` | Crear producto |
+| PUT | `/products/:id` | `products:update` | Actualizar producto |
+| DELETE | `/products/:id` | `products:delete` | Eliminar producto |
+
+**Listar productos (paginado)** `GET /api/products`
+
+Query params opcionales: `page` (default 1), `limit` (default 20, máx 100), `search` (nombre o SKU), `category` (ObjectId), `status` (`available`|`low`|`out`), `sort` (`name`|`sku`|`price`|`stock`|`createdAt`), `dir` (`asc`|`desc`).
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "message": "OK",
+  "data": {
+    "items": [ { "_id": "...", "name": "...", "sku": "..." } ],
+    "total": 87,
+    "page": 1,
+    "totalPages": 5
+  }
+}
+```
+
+Este mismo formato `{ items, total, page, totalPages }` lo usan también `GET /movements` y `GET /users`.
 
 **Crear producto** `POST /api/products`
 
@@ -238,7 +310,7 @@ Request:
 {
   "name": "Laptop Dell Inspiron 15",
   "sku": "LAP-DELL-001",
-  "category": "Electrónica",
+  "category": "664f1a2b...",
   "price": 15999.99,
   "stock": 24,
   "minStock": 5,
@@ -246,23 +318,16 @@ Request:
 }
 ```
 
-Response `201`:
+`category` es el ObjectId de una categoría existente (obtener vía `GET /categories`).
 
-```json
-{
-  "_id": "664f1a2b...",
-  "name": "Laptop Dell Inspiron 15",
-  "sku": "LAP-DELL-001",
-  "category": "Electrónica",
-  "price": 15999.99,
-  "stock": 24,
-  "minStock": 5,
-  "description": "Laptop Dell con procesador Intel i7",
-  "createdBy": "664f1a2b...",
-  "createdAt": "2026-06-21T00:00:00.000Z",
-  "updatedAt": "2026-06-21T00:00:00.000Z"
-}
-```
+**Importar productos desde Excel**
+
+Flujo en dos pasos:
+
+1. `POST /api/products/import/preview` — multipart/form-data, campo `file` (`.xlsx`, máx 3MB, máx 500 filas). Columnas reconocidas (sin importar acentos/mayúsculas): `Nombre`, `SKU`, `Categoria`, `Precio`, `Stock`, `Stock Minimo`, `Descripcion`. Valida cada fila (campos obligatorios, categoría existente y activa, SKU no duplicado) **sin escribir en la base de datos** y responde `{ valid, errors, totalRows }`.
+2. `POST /api/products/import/confirm` con `{ "rows": [...] }` (las filas `valid` devueltas por el preview) — vuelve a validar contra el estado actual de la DB e inserta en lote (`insertMany`). Responde `{ created, failed, errors }`.
+
+**Exportar inventario** `GET /api/products/export` — descarga directa de un `.xlsx` con todos los productos (no pasa por el envoltorio `sendSuccess`, es un archivo binario).
 
 **Estadísticas** `GET /api/products/stats`
 
@@ -270,23 +335,33 @@ Response `200`:
 
 ```json
 {
-  "totalProducts": 8,
-  "totalStock": 253,
-  "totalValue": 724896.42,
-  "lowStock": 2,
-  "outOfStock": 1,
-  "categories": 5
+  "success": true,
+  "message": "OK",
+  "data": {
+    "totalProducts": 8,
+    "totalStock": 253,
+    "totalValue": 724896.42,
+    "lowStock": 2,
+    "outOfStock": 1,
+    "categories": 5
+  }
 }
 ```
+
+Calculado con aggregation pipeline de MongoDB (no carga documentos en memoria).
 
 ---
 
 ### Usuarios
 
-| Método | Ruta | Descripción | Acceso |
+| Método | Ruta | Permiso | Descripción |
 |---|---|---|---|
-| GET | `/users` | Listar usuarios | ADMIN, SUPER_ADMIN |
-| POST | `/users` | Crear usuario | ADMIN, SUPER_ADMIN |
+| GET | `/users` | `users:read` | Listar paginado (`page`, `limit`), con sus roles |
+| GET | `/users/:id` | `users:read` | Detalle de un usuario con sus roles |
+| POST | `/users` | `users:create` | Crear usuario con rol asignado |
+| PUT | `/users/:id` | `users:update` | Actualizar nombre, email, contraseña o estado |
+
+`GET /users` responde `{ items, total, page, totalPages }` (mismo formato que productos y movimientos).
 
 **Crear usuario** `POST /api/users`
 
@@ -297,23 +372,63 @@ Request:
   "name": "María López",
   "email": "maria@empresa.com",
   "password": "123456",
-  "role": "MANAGER"
+  "roleName": "MANAGER"
 }
 ```
 
-Response `201`:
+`roleName` es opcional (default: USER). El sistema valida que el creador tenga todos los permisos del rol que asigna.
+
+**Actualizar usuario** `PUT /api/users/:id`
+
+Request (todos los campos son opcionales, solo se actualizan los enviados):
+
+```json
+{
+  "name": "María López García",
+  "email": "maria.lopez@empresa.com",
+  "password": "nuevoPassword123",
+  "status": "active"
+}
+```
+
+Response `200`:
 
 ```json
 {
   "success": true,
-  "message": "Usuario creado exitosamente",
+  "message": "Usuario actualizado exitosamente",
   "data": {
     "_id": "664f1a2b...",
-    "name": "María López",
-    "email": "maria@empresa.com",
-    "role": "MANAGER",
-    "status": "active"
+    "name": "María López García",
+    "email": "maria.lopez@empresa.com",
+    "status": "active",
+    "roles": ["MANAGER"]
   }
+}
+```
+
+`status` debe ser uno de: `active`, `inactive`, `blocked`. Si se envía `password`, se hashea automáticamente vía el hook `pre('save')` del modelo (la actualización usa `save()`, no `findByIdAndUpdate`, para que el hook se ejecute).
+
+---
+
+### Roles y permisos
+
+| Método | Ruta | Permiso | Descripción |
+|---|---|---|---|
+| GET | `/roles` | `roles:read` | Listar roles activos |
+| GET | `/roles/permissions` | `roles:read` | Listar todos los permisos del sistema |
+| GET | `/roles/:roleId/permissions` | `roles:read` | Permisos de un rol específico |
+| POST | `/roles/assign` | `users:assign-role` | Asignar rol a usuario |
+| POST | `/roles/revoke` | `users:assign-role` | Revocar rol de usuario |
+
+**Asignar rol** `POST /api/roles/assign`
+
+Request:
+
+```json
+{
+  "userId": "664f1a2b...",
+  "roleId": "664f1a2b..."
 }
 ```
 
@@ -321,19 +436,24 @@ Response `201`:
 
 ### Categorías
 
-| Método | Ruta | Descripción | Acceso |
+| Método | Ruta | Permiso | Descripción |
 |---|---|---|---|
-| GET | `/categories` | Listar categorías activas | Cualquier rol |
-| POST | `/categories` | Crear categoría | ADMIN+ |
+| GET | `/categories` | `categories:read` | Listar categorías. Con `?all=true` incluye inactivas (gestión) |
+| POST | `/categories` | `categories:create` | Crear categoría |
+| PUT | `/categories/:id` | `categories:update` | Renombrar y/o activar/desactivar (`{ name?, active? }`) |
 
 ---
 
 ### Movimientos de inventario
 
-| Método | Ruta | Descripción | Acceso |
+| Método | Ruta | Permiso | Descripción |
 |---|---|---|---|
-| GET | `/movements` | Listar todos | Cualquier rol |
-| POST | `/movements` | Crear movimiento | MANAGER+ |
+| GET | `/movements` | `movements:read` | Listar paginado, con filtros |
+| POST | `/movements` | `movements:create` | Crear movimiento (actualiza stock automáticamente) |
+
+**Listar movimientos (paginado y filtrado)** `GET /api/movements`
+
+Query params opcionales: `page`, `limit` (máx 100), `product` (ObjectId), `type` (`IN`|`OUT`|`ADJUSTMENT`), `startDate`, `endDate` (`YYYY-MM-DD`). Responde `{ items, total, page, totalPages }`.
 
 **Crear movimiento** `POST /api/movements`
 
@@ -348,63 +468,48 @@ Request:
 }
 ```
 
-Tipos de movimiento:
+Tipos: `IN` (suma al stock), `OUT` (resta del stock), `ADJUSTMENT` (establece stock al valor indicado).
 
-- `IN` - Entrada de stock
-- `OUT` - Salida de stock
-- `ADJUSTMENT` - Ajuste a cantidad exacta
+Cada movimiento registra `previousStock` y `newStock` para auditoría.
 
-> El stock del producto se actualiza automáticamente al crear el movimiento.
+---
+
+### Actividad reciente
+
+| Método | Ruta | Permiso | Descripción |
+|---|---|---|---|
+| GET | `/activity` | `activity:read` | Últimos 20 eventos de actividad, compartidos entre todos los usuarios |
+
+`activity:read` lo tienen los 4 roles. Los eventos se registran automáticamente desde los services (crear/editar/eliminar producto, categoría, movimiento, usuario, asignar/revocar rol, importar Excel) — no hay un endpoint público para crearlos manualmente.
 
 ---
 
 ### Health check
 
-| Método | Ruta | Descripción |
-|---|---|---|
-| GET | `/api/health` | Estado del servidor |
-
-Response `200`:
-
-```json
-{
-  "status": "ok",
-  "timestamp": "2026-06-21T00:00:00.000Z"
-}
+```
+GET /api/health
 ```
 
----
+Response: `{ "status": "ok", "timestamp": "2026-06-29T..." }`
 
-### Formato de errores
+## RBAC desacoplado
 
-Todas las respuestas de error siguen este formato:
+### Relaciones en base de datos
 
-```json
-{
-  "success": false,
-  "message": "Descripción del error"
-}
+```
+User <-- UserRole --> Role <-- RolePermission --> Permission
 ```
 
-| Código | Significado |
-|---|---|
-| 400 | Validación fallida o datos incorrectos |
-| 401 | Token faltante, inválido o expirado |
-| 403 | Sin permisos (RBAC) o cuenta desactivada |
-| 404 | Recurso no encontrado |
-| 409 | Conflicto (email o SKU duplicado) |
-| 423 | Cuenta bloqueada por intentos fallidos |
-| 429 | Rate limit excedido |
-| 500 | Error interno no controlado |
+Los permisos NO están en el modelo User ni hardcodeados en código. Se almacenan en MongoDB y se cachean en memoria (TTL 5 minutos). Un usuario puede tener múltiples roles.
 
-## Roles y permisos (RBAC)
-
-Jerarquía: **SUPER_ADMIN > ADMIN > MANAGER > USER**
+### Permisos por rol
 
 | Permiso | SUPER_ADMIN | ADMIN | MANAGER | USER |
 |---|:---:|:---:|:---:|:---:|
 | users:read | si | si | | |
 | users:create | si | si | | |
+| users:update | si | si | | |
+| users:delete | si | | | |
 | users:assign-role | si | | | |
 | products:read | si | si | si | si |
 | products:create | si | si | | |
@@ -412,32 +517,46 @@ Jerarquía: **SUPER_ADMIN > ADMIN > MANAGER > USER**
 | products:delete | si | si | | |
 | categories:read | si | si | si | si |
 | categories:create | si | si | | |
+| categories:update | si | si | | |
 | movements:read | si | si | si | si |
 | movements:create | si | si | si | |
+| roles:read | si | si | | |
+| activity:read | si | si | si | si |
 
-> **Protección contra elevación de privilegios:** Un ADMIN solo puede asignar roles inferiores al suyo (MANAGER, USER). Nadie puede auto-asignarse SUPER_ADMIN.
+### Protección contra elevación de privilegios
+
+Para asignar un rol, el asignador debe tener TODOS los permisos del rol que quiere asignar. Si un ADMIN intenta asignar SUPER_ADMIN, se rechaza porque el ADMIN no tiene `users:delete` ni `users:assign-role`.
 
 ## Seguridad
 
-| Capa | Implementación |
+| Protección | Implementación |
 |---|---|
-| Headers HTTP | Helmet (X-Content-Type-Options, CSP, HSTS, etc.) |
+| Headers HTTP | helmet configura CSP, HSTS, X-Content-Type-Options, etc. |
 | CORS | Restringido al origen definido en CORS_ORIGIN |
-| Rate limiting global | 100 peticiones / 15 minutos por IP |
-| Rate limiting login | 10 peticiones / 15 minutos por IP |
-| Bloqueo de cuenta | 5 intentos fallidos = bloqueo 15 minutos |
-| NoSQL injection | express-mongo-sanitize en todas las peticiones |
-| Validación de input | express-validator en cada endpoint con body y params |
-| Hashing | bcrypt con 12 salt rounds para contraseñas y refresh tokens |
-| JWT | Access token 15 min + Refresh token 7 días con secretos separados |
-| Body size | Límite de 10 KB por petición |
-| Campos sensibles | password, refreshToken, loginAttempts excluidos con select false y toJSON |
-| Errores | Sin stack traces en producción |
+| Rate limiting global | 100 peticiones / 15 min por IP |
+| Rate limiting login | 10 peticiones / 15 min por IP (adicional al global) |
+| Bloqueo de cuenta | 5 intentos fallidos de login = bloqueo 15 minutos |
+| Inyección NoSQL | express-mongo-sanitize elimina operadores $ y . del body |
+| Validación de datos | express-validator en cada endpoint antes del controller |
+| Hashing de contraseñas | bcrypt con 12 salt rounds vía hook pre-save de Mongoose |
+| Hashing de refresh tokens | bcrypt con 10 salt rounds, almacenados en DB |
+| Tokens JWT | Access token 15 min + Refresh token 7 días, secretos separados |
+| Tamaño de body | Límite de 10 KB por petición JSON; el upload de Excel (multipart, fuera de `express.json()`) tiene su propio límite de 3MB vía `multer` |
+| Campos sensibles | select: false en schema + toJSON() los elimina de las respuestas |
+| Transacciones | Movimientos de inventario usan sesión MongoDB si hay replica set; fallback automático sin transacción en standalone |
+| Stack traces | No se exponen en producción (solo en development) |
 
-## Conectar con el frontend
+## Códigos HTTP
 
-El frontend (React + Vite) ya está configurado para consumir `http://localhost:5000/api`. Para activar la conexión real:
-
-1. En `frontend/src/services/auth.service.js`, cambiar `USE_MOCK = true` a `USE_MOCK = false`
-2. En `frontend/src/services/product.service.js`, cambiar `USE_MOCK = true` a `USE_MOCK = false`
-3. Ejecutar backend (`npm run dev`) y frontend (`cd ../frontend && npm run dev`) en paralelo
+| Código | Significado en este proyecto |
+|---|---|
+| 200 | Operación exitosa |
+| 201 | Recurso creado (registro, crear producto, asignar rol) |
+| 400 | Datos inválidos o formato incorrecto |
+| 401 | Token ausente, inválido o expirado |
+| 403 | Sin permisos para la acción o cuenta desactivada |
+| 404 | Recurso no encontrado |
+| 409 | Conflicto: email, SKU o rol ya existe |
+| 423 | Cuenta bloqueada por intentos fallidos de login |
+| 429 | Rate limit excedido |
+| 500 | Error interno del servidor |

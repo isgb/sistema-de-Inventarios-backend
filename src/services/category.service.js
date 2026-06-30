@@ -1,11 +1,66 @@
+/**
+ * @fileoverview Servicio de gestión de categorías.
+ *
+ * Responsabilidad:
+ * Listar y crear categorías de productos.
+ * Solo se muestran categorías activas en los listados.
+ */
+
 const Category = require('../models/Category');
+const AppError = require('../utils/AppError');
+const activityService = require('./activity.service');
 
-async function getAll() {
-  return Category.find({ active: true }).sort({ name: 1 });
+/**
+ * Obtiene categorías ordenadas alfabéticamente.
+ * Por defecto solo las activas; con includeInactive=true devuelve todas
+ * (usado en la pantalla de gestión para poder reactivar una categoría).
+ *
+ * @param {boolean} [includeInactive=false]
+ * @returns {Promise<Category[]>}
+ */
+async function getAll(includeInactive = false) {
+  const filter = includeInactive ? {} : { active: true };
+  return Category.find(filter).sort({ name: 1 });
 }
 
-async function create(data) {
-  return Category.create(data);
+/**
+ * Crea una nueva categoría.
+ * Si el nombre ya existe, Mongoose lanza un error de duplicado
+ * que errorHandler convierte en 409.
+ *
+ * @param {{ name: string }} data
+ * @param {string} userId - Usuario que crea la categoría.
+ * @returns {Promise<Category>}
+ */
+async function create(data, userId) {
+  const category = await Category.create(data);
+  await activityService.log(userId, `Categoría creada: ${category.name}`, 'create');
+  return category;
 }
 
-module.exports = { getAll, create };
+/**
+ * Actualiza el nombre y/o el estado activo de una categoría.
+ *
+ * @param {string} id - ObjectId de la categoría.
+ * @param {{ name?: string, active?: boolean }} data
+ * @param {string} userId - Usuario que realiza la actualización.
+ * @returns {Promise<Category>} Categoría actualizada.
+ * @throws {AppError} 404 si no existe.
+ */
+async function update(id, data, userId) {
+  const category = await Category.findByIdAndUpdate(id, data, {
+    new: true,
+    runValidators: true,
+  });
+
+  if (!category) throw new AppError('Categoría no encontrada', 404);
+
+  const action = data.active !== undefined
+    ? `Categoría ${data.active ? 'activada' : 'desactivada'}: ${category.name}`
+    : `Categoría actualizada: ${category.name}`;
+  await activityService.log(userId, action, 'update');
+
+  return category;
+}
+
+module.exports = { getAll, create, update };

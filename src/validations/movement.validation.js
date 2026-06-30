@@ -1,3 +1,15 @@
+/**
+ * @fileoverview Reglas de validación para endpoints de movimientos de inventario.
+ *
+ * createMovementValidation:
+ * - product: requerido, debe ser un ObjectId válido de MongoDB.
+ *   El service valida que el producto exista.
+ * - type: requerido, uno de: IN (entrada), OUT (salida), ADJUSTMENT (ajuste).
+ * - quantity: requerido, entero >= 1. La validación de stock suficiente
+ *   para movimientos OUT se hace en el service, no aquí.
+ * - reason: opcional, max 500 caracteres.
+ */
+
 const { body } = require('express-validator');
 const mongoose = require('mongoose');
 

@@ -1,3 +1,18 @@
+/**
+ * @fileoverview Reglas de validación para endpoints de autenticación.
+ *
+ * Estas reglas se ejecutan ANTES del controller vía el middleware validate.
+ * Solo validan formato y presencia de datos, no lógica de negocio.
+ *
+ * Reglas aplicadas:
+ * - registerValidation: name (requerido, max 100), email (formato válido), password (min 6).
+ * - loginValidation: email (formato válido), password (requerido).
+ * - refreshValidation: refreshToken (requerido).
+ *
+ * normalizeEmail() convierte a minúsculas y normaliza el formato
+ * para evitar duplicados como "User@Gmail.COM" vs "user@gmail.com".
+ */
+
 const { body } = require('express-validator');
 
 const registerValidation = [

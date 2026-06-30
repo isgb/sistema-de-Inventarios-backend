@@ -1,8 +1,18 @@
+/**
+ * @fileoverview Middleware que ejecuta las reglas de express-validator.
+ *
+ * Responsabilidad:
+ * Se coloca DESPUÉS de los arrays de validación y ANTES del controller.
+ * Recopila todos los errores de validación y retorna 400 si hay alguno.
+ *
+ * Uso en rutas:
+ *   router.post('/', createProductValidation, validate, controller.create);
+ *                     ^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^
+ *                     reglas de validación       este middleware
+ */
+
 const { validationResult } = require('express-validator');
 
-/**
- * Middleware que ejecuta las validaciones de express-validator y retorna errores si los hay.
- */
 function validate(req, res, next) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {

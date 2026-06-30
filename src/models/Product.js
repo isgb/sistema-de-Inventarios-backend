@@ -1,3 +1,20 @@
+/**
+ * @fileoverview Modelo de producto del inventario.
+ *
+ * Responsabilidad:
+ * Representa un artículo del inventario con su stock, precio y categoría.
+ *
+ * Relaciones:
+ * - Product.category --> Category (ObjectId, no string. Permite populate y renombrado sin inconsistencias)
+ * - Product.createdBy --> User (quién registró el producto)
+ * - Product <-- InventoryMovement.product (movimientos que afectan su stock)
+ *
+ * Reglas de negocio:
+ * - El stock nunca puede ser negativo (min: 0).
+ * - minStock define el umbral de alerta de stock bajo.
+ * - El stock se actualiza vía movimientos de inventario, no directamente.
+ */
+
 const mongoose = require('mongoose');
 
 const productSchema = new mongoose.Schema({
@@ -21,9 +38,9 @@ const productSchema = new mongoose.Schema({
     default: '',
   },
   category: {
-    type: String,
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category',
     required: [true, 'La categoría es obligatoria'],
-    trim: true,
   },
   stock: {
     type: Number,
@@ -49,6 +66,10 @@ const productSchema = new mongoose.Schema({
 }, {
   timestamps: true,
 });
+
+productSchema.index({ category: 1 });
+productSchema.index({ createdBy: 1 });
+productSchema.index({ stock: 1, minStock: 1 });
 
 productSchema.methods.toJSON = function () {
   const obj = this.toObject();
