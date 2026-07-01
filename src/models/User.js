@@ -59,6 +59,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     select: false,
   },
+  isSeed: {
+    type: Boolean,
+    default: false,
+  },
 }, {
   timestamps: true,
 });

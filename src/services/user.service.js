@@ -110,6 +110,10 @@ async function update(id, data, actorId) {
   const user = await User.findById(id).select('+password');
   if (!user) throw new AppError('Usuario no encontrado', 404);
 
+  if (user.isSeed && data.status && data.status !== 'active') {
+    throw new AppError('Este usuario es parte de los datos de demo y no puede desactivarse', 403);
+  }
+
   if (data.email && data.email !== user.email) {
     const emailTaken = await User.findOne({ email: data.email, _id: { $ne: id } });
     if (emailTaken) throw new AppError('Este correo ya está en uso por otro usuario', 409);

@@ -237,8 +237,11 @@ async function update(id, data, userId) {
  * @throws {AppError} 404 si no existe.
  */
 async function remove(id, userId) {
-  const product = await Product.findByIdAndDelete(id);
+  const product = await Product.findById(id);
   if (!product) throw new AppError('Producto no encontrado', 404);
+  if (product.isSeed) throw new AppError('Este producto es parte de los datos de demo y no puede eliminarse', 403);
+
+  await Product.findByIdAndDelete(id);
   await activityService.log(userId, `Producto eliminado: ${product.name}`, 'delete');
   return product;
 }

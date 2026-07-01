@@ -48,19 +48,25 @@ async function create(data, userId) {
  * @throws {AppError} 404 si no existe.
  */
 async function update(id, data, userId) {
-  const category = await Category.findByIdAndUpdate(id, data, {
+  const category = await Category.findById(id);
+  if (!category) throw new AppError('Categoría no encontrada', 404);
+  if (category.isSeed && data.active === false) {
+    throw new AppError('Esta categoría es parte de los datos de demo y no puede desactivarse', 403);
+  }
+
+  const updated = await Category.findByIdAndUpdate(id, data, {
     new: true,
     runValidators: true,
   });
 
-  if (!category) throw new AppError('Categoría no encontrada', 404);
+  if (!updated) throw new AppError('Categoría no encontrada', 404);
 
   const action = data.active !== undefined
     ? `Categoría ${data.active ? 'activada' : 'desactivada'}: ${category.name}`
     : `Categoría actualizada: ${category.name}`;
   await activityService.log(userId, action, 'update');
 
-  return category;
+  return updated;
 }
 
 module.exports = { getAll, create, update };

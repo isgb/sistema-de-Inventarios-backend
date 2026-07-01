@@ -27,6 +27,10 @@ const categorySchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  isSeed: {
+    type: Boolean,
+    default: false,
+  },
 }, {
   timestamps: true,
 });

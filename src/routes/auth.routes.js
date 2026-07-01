@@ -25,11 +25,11 @@ const rateLimit = require('express-rate-limit');
 
 const router = Router();
 
-/** Rate limiter exclusivo para login: 10 intentos cada 15 minutos por IP */
+/** Rate limiter exclusivo para login: 20 intentos por minuto por IP (protección demo pública) */
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  message: { success: false, message: 'Demasiados intentos de login. Intenta de nuevo en 15 minutos' },
+  windowMs: 60 * 1000,
+  max: 20,
+  message: { success: false, message: 'Demasiados intentos de login. Intenta de nuevo en un minuto' },
   standardHeaders: true,
   legacyHeaders: false,
 });

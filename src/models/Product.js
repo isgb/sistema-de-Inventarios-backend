@@ -63,6 +63,10 @@ const productSchema = new mongoose.Schema({
     ref: 'User',
     required: true,
   },
+  isSeed: {
+    type: Boolean,
+    default: false,
+  },
 }, {
   timestamps: true,
 });

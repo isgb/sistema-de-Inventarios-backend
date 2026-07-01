@@ -25,6 +25,8 @@ const Product = require('../models/Product');
 const AppError = require('../utils/AppError');
 const activityService = require('./activity.service');
 
+const MAX_MOVEMENTS = 5000;
+
 /**
  * Construye el filtro de Mongo a partir de los query params de la lista.
  *
@@ -119,7 +121,32 @@ async function create({ product: productId, type, quantity, reason }, userId) {
     'create',
   );
 
+  trimMovementsIfNeeded();
   return movement;
+}
+
+/**
+ * Elimina los movimientos más antiguos si el total supera MAX_MOVEMENTS.
+ * Se ejecuta de forma asíncrona (fire-and-forget) después de cada creación.
+ * Un fallo aquí nunca afecta la operación principal.
+ *
+ * @private
+ */
+async function trimMovementsIfNeeded() {
+  try {
+    const total = await InventoryMovement.countDocuments();
+    if (total <= MAX_MOVEMENTS) return;
+
+    const overflow = total - MAX_MOVEMENTS;
+    const oldest = await InventoryMovement.find()
+      .sort({ createdAt: 1 })
+      .limit(overflow)
+      .select('_id');
+
+    await InventoryMovement.deleteMany({ _id: { $in: oldest.map((m) => m._id) } });
+  } catch {
+    // trim failure must not propagate
+  }
 }
 
 /** @private Ejecuta con transacción MongoDB (requiere replica set). */

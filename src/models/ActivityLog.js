@@ -34,6 +34,8 @@ const activityLogSchema = new mongoose.Schema({
 });
 
 activityLogSchema.index({ createdAt: -1 });
+// TTL: MongoDB elimina automáticamente registros con más de 90 días
+activityLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
 
 activityLogSchema.methods.toJSON = function () {
   const obj = this.toObject();

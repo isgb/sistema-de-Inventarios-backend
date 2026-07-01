@@ -141,8 +141,9 @@ Crea los datos mínimos para que el sistema funcione:
 - 39 mapeos rol-permiso: qué permisos tiene cada rol
 - 4 usuarios de prueba (uno por rol), ver tabla en [Usuarios de prueba](#usuarios-de-prueba)
 - 8 categorías: Electrónica, Periféricos, Mobiliario, Accesorios, Almacenamiento, Software, Redes, Otros
+- 10 productos de demostración (SKU con prefijo `SEED-`) con `isSeed: true`
 
-El seed es idempotente: puede ejecutarse varias veces sin duplicar datos.
+El seed es idempotente: puede ejecutarse varias veces sin duplicar datos. Los usuarios y categorías del seed se marcan con `isSeed: true` en cada ejecución, aunque ya existan.
 
 ### Usuarios de prueba
 
@@ -492,6 +493,28 @@ GET /api/health
 
 Response: `{ "status": "ok", "timestamp": "2026-06-29T..." }`
 
+## Protección de datos de demo
+
+Los registros creados por el seed llevan `isSeed: true` en su documento. El sistema aplica reglas especiales sobre ellos para mantener la demo estable en despliegue público:
+
+| Colección | Protección |
+|---|---|
+| `products` | No se pueden eliminar (DELETE devuelve 403) |
+| `categories` | No se pueden desactivar (`PUT { active: false }` devuelve 403) |
+| `users` | No se pueden pasar a `inactive` ni `blocked` (PUT devuelve 403) |
+
+Estas validaciones viven en los services (`product.service.remove`, `category.service.update`, `user.service.update`). El campo `isSeed` aparece en las respuestas de la API como referencia.
+
+## Mantenimiento automático de MongoDB
+
+### ActivityLog — TTL 90 días
+
+`ActivityLog` tiene un índice TTL sobre `createdAt` con `expireAfterSeconds: 90 * 24 * 60 * 60`. MongoDB elimina automáticamente los registros con más de 90 días sin intervención manual.
+
+### Movimientos — límite de 5 000 registros
+
+`InventoryMovement` **no** tiene TTL (para no degradar métricas históricas del dashboard). En cambio, `movement.service.js` dispara `trimMovementsIfNeeded()` de forma asíncrona (fire-and-forget) después de cada creación: si el total supera `MAX_MOVEMENTS = 5000`, se eliminan los registros más antiguos. Un fallo del trim nunca cancela el movimiento principal.
+
 ## RBAC desacoplado
 
 ### Relaciones en base de datos
@@ -534,7 +557,10 @@ Para asignar un rol, el asignador debe tener TODOS los permisos del rol que quie
 | Headers HTTP | helmet configura CSP, HSTS, X-Content-Type-Options, etc. |
 | CORS | Restringido al origen definido en CORS_ORIGIN |
 | Rate limiting global | 100 peticiones / 15 min por IP |
-| Rate limiting login | 10 peticiones / 15 min por IP (adicional al global) |
+| Rate limiting login | 20 peticiones / 1 min por IP |
+| Rate limiting crear usuario | 5 peticiones / 1 min por IP |
+| Rate limiting crear producto | 20 peticiones / 1 min por IP |
+| Rate limiting importar Excel | 2 peticiones / 1 min por IP (preview y confirm) |
 | Bloqueo de cuenta | 5 intentos fallidos de login = bloqueo 15 minutos |
 | Inyección NoSQL | express-mongo-sanitize elimina operadores $ y . del body |
 | Validación de datos | express-validator en cada endpoint antes del controller |

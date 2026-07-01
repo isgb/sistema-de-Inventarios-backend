@@ -32,6 +32,7 @@ const Permission = require('../models/Permission');
 const RolePermission = require('../models/RolePermission');
 const UserRole = require('../models/UserRole');
 const Category = require('../models/Category');
+const Product = require('../models/Product');
 
 /** Roles del sistema con su descripción */
 const ROLES_DATA = [
@@ -111,6 +112,24 @@ const CATEGORIES = [
   'Almacenamiento', 'Software', 'Redes', 'Otros',
 ];
 
+/**
+ * Productos de demostración — protegidos con isSeed: true para
+ * que no puedan eliminarse desde la UI pública.
+ * La propiedad categoryName se resuelve a un ObjectId durante el seed.
+ */
+const SEED_PRODUCTS = [
+  { name: 'Laptop Dell XPS 15', sku: 'SEED-DELL-XPS15', categoryName: 'Electrónica', price: 25000, stock: 12, minStock: 3, description: 'Laptop de alto rendimiento para profesionales' },
+  { name: 'Monitor LG UltraWide 27"', sku: 'SEED-LG-MON27', categoryName: 'Periféricos', price: 6500, stock: 8, minStock: 2, description: 'Monitor Full HD con panel IPS' },
+  { name: 'Teclado Mecánico RGB', sku: 'SEED-KB-MECH', categoryName: 'Periféricos', price: 1200, stock: 25, minStock: 5, description: 'Teclado mecánico retroiluminado para oficina' },
+  { name: 'Silla Ergonómica Pro', sku: 'SEED-SILLA-ERG', categoryName: 'Mobiliario', price: 4800, stock: 6, minStock: 2, description: 'Silla de oficina con soporte lumbar ajustable' },
+  { name: 'Disco SSD NVMe 1TB', sku: 'SEED-SSD-1TB', categoryName: 'Almacenamiento', price: 2200, stock: 15, minStock: 4, description: 'SSD NVMe de alta velocidad, lectura 3500 MB/s' },
+  { name: 'Switch 24 Puertos Gigabit', sku: 'SEED-SW-24P', categoryName: 'Redes', price: 3500, stock: 4, minStock: 2, description: 'Switch administrable Layer 2 para rack' },
+  { name: 'Mouse Inalámbrico Ergonómico', sku: 'SEED-MOUSE-WL', categoryName: 'Accesorios', price: 450, stock: 30, minStock: 8, description: 'Mouse vertical inalámbrico, 2.4GHz' },
+  { name: 'Office 365 Business Basic', sku: 'SEED-OFF365', categoryName: 'Software', price: 1800, stock: 10, minStock: 2, description: 'Licencia anual Microsoft 365 por usuario' },
+  { name: 'Headset USB Noise Cancelling', sku: 'SEED-HEADSET-USB', categoryName: 'Accesorios', price: 980, stock: 18, minStock: 4, description: 'Auriculares con cancelación de ruido activa' },
+  { name: 'Laptop Lenovo ThinkPad E14', sku: 'SEED-LENOVO-E14', categoryName: 'Electrónica', price: 18500, stock: 0, minStock: 2, description: 'Laptop empresarial ultraportátil (sin stock)' },
+];
+
 async function seed() {
   try {
     await mongoose.connect(process.env.MONGODB_URI);
@@ -161,6 +180,7 @@ async function seed() {
     console.log(`${mappingsCreated} mapeos rol-permiso creados/actualizados`);
 
     // 4. Crear usuarios de prueba (uno por cada rol)
+    let adminUserId = null;
     for (const testUser of TEST_USERS) {
       let user = await User.findOne({ email: testUser.email });
       if (!user) {
@@ -169,11 +189,16 @@ async function seed() {
           email: testUser.email,
           password: testUser.password,
           status: 'active',
+          isSeed: true,
         });
         console.log(`${testUser.roleName} creado: ${testUser.email} / ${testUser.password}`);
       } else {
-        console.log(`Usuario ${testUser.email} ya existe, omitiendo...`);
+        // Marcar como isSeed aunque ya exista
+        await User.findByIdAndUpdate(user._id, { isSeed: true });
+        console.log(`Usuario ${testUser.email} ya existe, marcado como isSeed`);
       }
+
+      if (testUser.roleName === 'SUPER_ADMIN') adminUserId = user._id;
 
       // 5. Asignar rol correspondiente
       const role = roles[testUser.roleName];
@@ -185,15 +210,42 @@ async function seed() {
     }
     console.log(`${TEST_USERS.length} usuarios de prueba con roles asignados`);
 
-    // 6. Crear categorías
+    // 6. Crear categorías con isSeed: true
+    const categoryDocs = {};
     for (const name of CATEGORIES) {
-      await Category.findOneAndUpdate(
+      const category = await Category.findOneAndUpdate(
         { name },
-        { name, active: true },
-        { upsert: true },
+        { name, active: true, isSeed: true },
+        { upsert: true, new: true },
       );
+      categoryDocs[name] = category;
     }
     console.log(`${CATEGORIES.length} categorías creadas/actualizadas`);
+
+    // 7. Crear productos de demostración con isSeed: true
+    let productsCreated = 0;
+    for (const seedProduct of SEED_PRODUCTS) {
+      const category = categoryDocs[seedProduct.categoryName];
+      if (!category) continue;
+
+      await Product.findOneAndUpdate(
+        { sku: seedProduct.sku },
+        {
+          name: seedProduct.name,
+          sku: seedProduct.sku,
+          category: category._id,
+          price: seedProduct.price,
+          stock: seedProduct.stock,
+          minStock: seedProduct.minStock,
+          description: seedProduct.description,
+          createdBy: adminUserId,
+          isSeed: true,
+        },
+        { upsert: true, new: true },
+      );
+      productsCreated++;
+    }
+    console.log(`${productsCreated} productos de demo creados/actualizados`);
 
     console.log('\nSeed completado exitosamente');
     process.exit(0);
